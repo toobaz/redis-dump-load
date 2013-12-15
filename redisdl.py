@@ -4,6 +4,14 @@ try:
     import json
 except ImportError:
     import simplejson as json
+try:
+    from jsaone import load as stream_load
+except ImportError:
+    from ijson import items
+    stream_load = lambda s : items(s, '')
+except ImportError:
+    stream_load = json.load
+
 import redis
 
 def dumps(host='localhost', port=6379, password=None, db=0, pretty=False):
@@ -80,8 +88,15 @@ def loads(s, host='localhost', port=6379, password=None, db=0, empty=False):
         _writer(r, key, type, value)
 
 def load(fp, host='localhost', port=6379, password=None, db=0, empty=False):
-    s = fp.read()
-    loads(s, host, port, password, db, empty)
+    r = redis.Redis(host=host, port=port, password=password, db=db)
+    if empty:
+        for key in r.keys():
+            r.delete(key)
+    table = stream_load(fp)
+    for key, item in table:
+        type = item['type']
+        value = item['value']
+        _writer(r, key, type, value)
 
 def _writer(r, key, type, value):
     r.delete(key)
