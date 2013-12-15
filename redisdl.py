@@ -14,8 +14,23 @@ except ImportError:
 
 import redis
 
-def dumps(host='localhost', port=6379, password=None, db=0, pretty=False):
-    r = redis.Redis(host=host, port=port, password=password, db=db)
+def client(host='localhost', port=6379, password=None, db=0,
+                 unix_socket_path=''):
+    if unix_socket_path:
+        r = redis.Redis(unix_socket_path=unix_socket_path,
+                        password=None,
+                        db=db)
+    else:
+        r = redis.Redis(host=host,
+                        port=port,
+                        password=password,
+                        db=db)
+    return r
+
+def dumps(host='localhost', port=6379, password=None, db=0, pretty=False,
+          unix_socket_path=''):
+    r = client(host=host, port=port, password=password, db=db,
+               unix_socket_path='')
     kwargs = {}
     if not pretty:
         kwargs['separators'] = (',', ':')
@@ -28,13 +43,15 @@ def dumps(host='localhost', port=6379, password=None, db=0, pretty=False):
         table[key] = {'type': type, 'value': value}
     return encoder.encode(table)
 
-def dump(fp, host='localhost', port=6379, password=None, db=0, pretty=False):
+def dump(fp, host='localhost', port=6379, password=None, db=0, pretty=False,
+         unix_socket_path=''):
     if pretty:
         # hack to avoid implementing pretty printing
         fp.write(dumps(host=host, port=port, password=password, db=db, pretty=pretty))
         return
     
-    r = redis.Redis(host=host, port=port, password=password, db=db)
+    r = client(host=host, port=port, password=password, db=db,
+               unix_socket_path='')
     kwargs = {}
     if not pretty:
         kwargs['separators'] = (',', ':')
@@ -75,8 +92,10 @@ def _reader(r, pretty):
             raise UnknownTypeError("Unknown key type: %s" % type)
         yield key, type, value
 
-def loads(s, host='localhost', port=6379, password=None, db=0, empty=False):
-    r = redis.Redis(host=host, port=port, password=password, db=db)
+def loads(s, host='localhost', port=6379, password=None, db=0, empty=False,
+          unix_socket_path=''):
+    r = client(host=host, port=port, password=password, db=db,
+               unix_socket_path='')
     if empty:
         for key in r.keys():
             r.delete(key)
@@ -87,8 +106,10 @@ def loads(s, host='localhost', port=6379, password=None, db=0, empty=False):
         value = item['value']
         _writer(r, key, type, value)
 
-def load(fp, host='localhost', port=6379, password=None, db=0, empty=False):
-    r = redis.Redis(host=host, port=port, password=password, db=db)
+def load(fp, host='localhost', port=6379, password=None, db=0, empty=False,
+         unix_socket_path=''):
+    r = client(host=host, port=port, password=password, db=db,
+               unix_socket_path='')
     if empty:
         for key in r.keys():
             r.delete(key)
