@@ -13,12 +13,23 @@ except ImportError:
     stream_load = json.load
 
 import redis
+import sys
+
+py3 = sys.version_info[0] == 3
+
+if py3:
+    base_exception_class = Exception
+else:
+    base_exception_class = StandardError
+
+class UnknownTypeError(base_exception_class):
+    pass
 
 def client(host='localhost', port=6379, password=None, db=0,
-                 unix_socket_path=''):
-    if unix_socket_path:
+                 unix_socket_path=None):
+    if unix_socket_path is not None:
         r = redis.Redis(unix_socket_path=unix_socket_path,
-                        password=None,
+                        password=password,
                         db=db)
     else:
         r = redis.Redis(host=host,
@@ -28,9 +39,9 @@ def client(host='localhost', port=6379, password=None, db=0,
     return r
 
 def dumps(host='localhost', port=6379, password=None, db=0, pretty=False,
-          unix_socket_path=''):
+          unix_socket_path=None):
     r = client(host=host, port=port, password=password, db=db,
-               unix_socket_path='')
+               unix_socket_path=unix_socket_path)
     kwargs = {}
     if not pretty:
         kwargs['separators'] = (',', ':')
@@ -44,14 +55,14 @@ def dumps(host='localhost', port=6379, password=None, db=0, pretty=False,
     return encoder.encode(table)
 
 def dump(fp, host='localhost', port=6379, password=None, db=0, pretty=False,
-         unix_socket_path=''):
+         unix_socket_path=None):
     if pretty:
         # hack to avoid implementing pretty printing
         fp.write(dumps(host=host, port=port, password=password, db=db, pretty=pretty))
         return
     
     r = client(host=host, port=port, password=password, db=db,
-               unix_socket_path='')
+               unix_socket_path=unix_socket_path)
     kwargs = {}
     if not pretty:
         kwargs['separators'] = (',', ':')
@@ -75,27 +86,32 @@ def dump(fp, host='localhost', port=6379, password=None, db=0, pretty=False,
 
 def _reader(r, pretty):
     for key in r.keys():
-        type = r.type(key)
+        key = key.decode()
+        type = r.type(key).decode()
         if type == 'string':
-            value = r.get(key)
+            value = r.get(key).decode()
         elif type == 'list':
-            value = r.lrange(key, 0, -1)
+            value = [v.decode() for v in r.lrange(key, 0, -1)]
         elif type == 'set':
-            value = list(r.smembers(key))
+            value = [v.decode() for v in r.smembers(key)]
             if pretty:
                 value.sort()
         elif type == 'zset':
-            value = r.zrange(key, 0, -1, False, True)
+            encoded = r.zrange(key, 0, -1, False, True)
+            value = [(k.decode(), score) for k, score in encoded]
         elif type == 'hash':
-            value = r.hgetall(key)
+            encoded = r.hgetall(key)
+            value = {}
+            for k in encoded:
+                value[k.decode()] = encoded[k].decode()
         else:
             raise UnknownTypeError("Unknown key type: %s" % type)
         yield key, type, value
 
 def loads(s, host='localhost', port=6379, password=None, db=0, empty=False,
-          unix_socket_path=''):
+          unix_socket_path=None):
     r = client(host=host, port=port, password=password, db=db,
-               unix_socket_path='')
+               unix_socket_path=unix_socket_path)
     if empty:
         for key in r.keys():
             r.delete(key)
@@ -107,9 +123,9 @@ def loads(s, host='localhost', port=6379, password=None, db=0, empty=False,
         _writer(r, key, type, value)
 
 def load(fp, host='localhost', port=6379, password=None, db=0, empty=False,
-         unix_socket_path=''):
+         unix_socket_path=None):
     r = client(host=host, port=port, password=password, db=db,
-               unix_socket_path='')
+               unix_socket_path=unix_socket_path)
     if empty:
         for key in r.keys():
             r.delete(key)
@@ -152,6 +168,8 @@ if __name__ == '__main__':
             args['host'] = options.host
         if options.port:
             args['port'] = int(options.port)
+        if options.socket:
+            args['unix_socket_path'] = options.socket
         if options.password:
             args['password'] = options.password
         if options.db:
